@@ -11,14 +11,16 @@ import { IUser } from 'src/models/user.model';
 import { SignUpDto } from './dto/signUp.dto';
 import { LogInDto } from './dto/logIn.dto';
 import { ValidationError } from 'class-validator';
+import { User } from './user.entity';
 
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get()
-  getAllUsers(): IUser[] {
-    return this.usersService.getAllUsers();
+  getAllUsers(): Promise<User[]> {
+    const users = this.usersService.getAllUsers();
+    return users;
   }
 
   @Post('signup')

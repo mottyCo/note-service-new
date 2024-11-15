@@ -2,73 +2,90 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
-import { FakeDbService } from 'src/fake_db/fake_db.service';
-import { IUser } from 'src/models/user.model';
-import { v4 as uuid } from 'uuid';
 import { SignUpDto } from './dto/signUp.dto';
 import { LogInDto } from './dto/logIn.dto';
+import { InjectRepository } from '@nestjs/typeorm';
+import { User } from './user.entity';
+import { Repository } from 'typeorm';
+import { JwtService } from '@nestjs/jwt';
+import * as bcrypt from 'bcrypt';
+import { JwtPayload } from './jwt-payload.interface';
+import { UserRepository } from './users.repository';
 
 @Injectable()
 export class UsersService {
-  constructor(private fakeDbService: FakeDbService) {}
-  signUp = (signUpDto: SignUpDto): Promise<{ token: string }> => {
-    return new Promise((reslove, reject) => {
-      if (this.fakeDbService.isUserNameExist(signUpDto.userName)) {
-        throw new ConflictException('userName already taken');
-      }
-      if (this.fakeDbService.isEmailExist(signUpDto.email)) {
-        throw new ConflictException('email already exist');
-      }
-      const newId = uuid();
-      const newUser: IUser = {
-        id: newId,
-        firstName: signUpDto.firstName,
-        lastName: signUpDto.lastName,
-        userName: signUpDto.userName,
-        email: signUpDto.email,
-        password: signUpDto.password,
-      };
-      this.fakeDbService.addUserToDb(newUser);
-      reslove({ token: uuid() });
+  constructor(
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
+    private jwtService: JwtService,
+  ) {}
+
+  async signUp(signUpDto: SignUpDto): Promise<{ token: string }> {
+    const { firstName, lastName, userName, email, password } = signUpDto;
+
+    const salt = await bcrypt.genSalt();
+    const hashedPassword = await bcrypt.hash(password, salt);
+    const user = this.userRepository.create({
+      firstName,
+      lastName,
+      userName,
+      email,
+      password: hashedPassword,
     });
-  };
-  logIn = (logInDto: LogInDto): Promise<{ token: string }> => {
-    return new Promise((resolve, reject) => {
-      let user!: IUser;
-      try {
-        if (logInDto.userName) {
-          console.log(this.fakeDbService.isUserNameExist(logInDto.userName));
-          if (this.fakeDbService.isUserNameExist(logInDto.userName)) {
-            console.log('here2');
-            user = this.fakeDbService.getUserByUserName(logInDto.userName);
-          } else {
-            throw new Error(`user name ${logInDto.userName} not exist`);
-          }
-        } else if (logInDto.email) {
-          if (this.fakeDbService.isEmailExist(logInDto.email)) {
-            user = this.fakeDbService.getUserByEmail(logInDto.email);
-          } else {
-            throw new Error(`email ${logInDto.email} not exist`);
-          }
-        } else {
-          throw new Error('mast include user name or email');
+    try {
+      await this.userRepository.save(user);
+      const payload: JwtPayload = { userName };
+      const token: string = await this.jwtService.sign(payload);
+      return { token };
+    } catch (error) {
+      console.log(error);
+
+      if (error.code === '23505') {
+        // PostgreSQL unique violation error code
+        const detail = error.detail as string;
+
+        if (detail.includes('email')) {
+          throw new ConflictException(
+            'The email address is already in use. Please choose a different email.',
+          );
+        } else if (detail.includes('userName')) {
+          throw new ConflictException(
+            'The username is already taken. Please choose a different username.',
+          );
         }
-      } catch (error) {
-        throw new BadRequestException(error.message);
-      }
-      if (this.isItUserPassword(user, logInDto.password)) {
-        resolve({ token: uuid() });
       } else {
-        throw new BadRequestException('incorrect password');
+        throw new InternalServerErrorException();
       }
-    });
-  };
-  isItUserPassword(user: IUser, password: string): boolean {
-    if (user.password === password) return true;
-    return false;
+    }
   }
-  getAllUsers(): IUser[] {
-    return this.fakeDbService.getUsers();
+
+  async logIn(logInDto: LogInDto): Promise<{ token: string }> {
+    const { userName, email, password } = logInDto;
+    let user!: User;
+    if (userName) {
+      user = await this.userRepository.findOne({ where: { userName } });
+    } else if (email) {
+      user = await this.userRepository.findOne({ where: { email } });
+    } else {
+      throw new BadRequestException('mast include user name or email');
+    }
+    if (!user) {
+      throw new NotFoundException('user not exist');
+    }
+    if (await bcrypt.compare(password, user.password)) {
+      const payload: JwtPayload = { userName };
+      const token: string = await this.jwtService.sign(payload);
+      return { token };
+    } else {
+      throw new UnauthorizedException('password incorrect');
+    }
+  }
+
+  async getAllUsers(): Promise<User[]> {
+    return await this.userRepository.find();
   }
 }
