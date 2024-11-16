@@ -1,4 +1,11 @@
-import { Column, Entity, PrimaryGeneratedColumn, Unique } from 'typeorm';
+import { Note } from 'src/notes/notes.entity';
+import {
+  Column,
+  Entity,
+  OneToMany,
+  PrimaryGeneratedColumn,
+  Unique,
+} from 'typeorm';
 
 @Entity()
 @Unique('unique_email_constraint', ['email'])
@@ -21,4 +28,7 @@ export class User {
 
   @Column()
   password: string;
+
+  @OneToMany((_type) => Note, (note) => note.user, { eager: true })
+  notes: Note[];
 }
