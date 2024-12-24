@@ -5,6 +5,7 @@ import { signUpValidator } from './pipes/validator.pipe';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.useGlobalPipes(signUpValidator);
+  app.enableCors();
   await app.listen(3000);
 }
 bootstrap();
